@@ -30,9 +30,6 @@
 #include "build/build_config.h"
 #include "build/debug.h"
 
-#include "common/axis.h"
-#include "common/vector.h"
-
 #include "pg/pg.h"
 #include "pg/pg_ids.h"
 
@@ -217,12 +214,12 @@ STATIC_UNIT_TESTED void imuMahonyAHRSupdate(float dt, float gx, float gy, float 
 
         // Compute heading vector in EF from scalar CoG. CoG is clockwise from North
         // Note that Earth frame X is pointing north and sin/cos argument is anticlockwise
-        const fpVector2_t cog_ef = {.x = cos_approx(-courseOverGround), .y = sin_approx(-courseOverGround)};
+        const vector2_t cog_ef = {.x = cos_approx(-courseOverGround), .y = sin_approx(-courseOverGround)};
 #define THRUST_COG 1
 #if THRUST_COG
-        const fpVector2_t heading_ef = {.x = rMat[X][Z], .y = rMat[Y][Z]};  // body Z axis (up) - direction of thrust vector
+        const vector2_t heading_ef = {.x = rMat[X][Z], .y = rMat[Y][Z]};  // body Z axis (up) - direction of thrust vector
 #else
-        const fpVector2_t heading_ef = {.x = rMat[0][0], .y = rMat[1][0]};  // body X axis. Projected vector magnitude is reduced as pitch increases
+        const vector2_t heading_ef = {.x = rMat[0][0], .y = rMat[1][0]};  // body X axis. Projected vector magnitude is reduced as pitch increases
 #endif
         // cross product = 1 * |heading| * sin(angle) (magnitude of Z vector in 3D)
         // order operands so that rotation is in direction of zero error
@@ -231,7 +228,7 @@ STATIC_UNIT_TESTED void imuMahonyAHRSupdate(float dt, float gx, float gy, float 
         const float dot = vector2Dot(&heading_ef, &cog_ef);
         // use cross product / sin(angle) when error < 90deg (cos > 0),
         //   |heading| if error is larger (cos < 0)
-        const float heading_mag = vector2Mag(&heading_ef);
+        const float heading_mag = vector2Norm(&heading_ef);
         float ez_ef = (dot > 0) ? cross : (cross < 0 ? -1.0f : 1.0f) * heading_mag;
 #if THRUST_COG
         // increase gain for small tilt (just heuristic; sqrt is cheap on F4+)
@@ -251,27 +248,27 @@ STATIC_UNIT_TESTED void imuMahonyAHRSupdate(float dt, float gx, float gy, float 
 
 #ifdef USE_MAG
     // Use measured magnetic field vector
-    fpVector3_t mag_bf = {{mag.magADC[X], mag.magADC[Y], mag.magADC[Z]}};
-    float recipMagNorm = vectorNormSquared(&mag_bf);
+    vector3_t mag_bf = mag.magADC;
+    float recipMagNorm = vector3NormSq(&mag_bf);
     if (useMag && recipMagNorm > 0.01f) {
         // Normalise magnetometer measurement
-        vectorNormalize(&mag_bf, &mag_bf);
+        vector3Normalize(&mag_bf, &mag_bf);
 
         // For magnetometer correction we make an assumption that magnetic field is perpendicular to gravity (ignore Z-component in EF).
         // This way magnetic field will only affect heading and wont mess roll/pitch angles
 
         // (hx; hy; 0) - measured mag field vector in EF (forcing Z-component to zero)
         // (bx; 0; 0) - reference mag field vector heading due North in EF (assuming Z-component is zero)
-        fpVector3_t mag_ef;
-        matrixVectorMul(&mag_ef, (const fpMat33_t*)&rMat, &mag_bf);  // BF->EF
+        vector3_t mag_ef;
+        matrixVectorMul(&mag_ef, (const matrix33_t*)&rMat, &mag_bf);  // BF->EF
         mag_ef.z = 0.0f;                // project to XY plane (optimized away)
 
-        fpVector2_t north_ef = {{ 1.0f, 0.0f }};
+        vector2_t north_ef = {{ 1.0f, 0.0f }};
         // magnetometer error is cross product between estimated magnetic north and measured magnetic north (calculated in EF)
         // increase gain on large misalignment
-        const float dot = vector2Dot((fpVector2_t*)&mag_ef, &north_ef);
-        const float cross = vector2Cross((fpVector2_t*)&mag_ef, &north_ef);
-        const float ez_ef = (dot > 0) ? cross : (cross < 0 ? -1.0f : 1.0f) * vector2Mag((fpVector2_t*)&mag_ef);
+        const float dot = vector2Dot((vector2_t*)&mag_ef, &north_ef);
+        const float cross = vector2Cross((vector2_t*)&mag_ef, &north_ef);
+        const float ez_ef = (dot > 0) ? cross : (cross < 0 ? -1.0f : 1.0f) * vector2Norm((vector2_t*)&mag_ef);
         // Rotate mag error vector back to BF and accumulate
         ex += rMat[2][0] * ez_ef;
         ey += rMat[2][1] * ez_ef;
@@ -366,15 +363,9 @@ STATIC_UNIT_TESTED void imuUpdateEulerAngles(void)
     }
 }
 
-static bool imuIsAccelerometerHealthy(float *accAverage)
+static bool imuIsAccelerometerHealthy(vector3_t *accAverage)
 {
-    float accMagnitudeSq = 0;
-    for (int axis = 0; axis < 3; axis++) {
-        const float a = accAverage[axis];
-        accMagnitudeSq += a * a;
-    }
-
-    accMagnitudeSq = accMagnitudeSq * sq(acc.dev.acc_1G_rec);
+    const float accMagnitudeSq = vector3NormSq(accAverage) * sq(acc.dev.acc_1G_rec);
 
     // Accept accel readings only in range 0.9g - 1.1g
     return (0.81f < accMagnitudeSq) && (accMagnitudeSq < 1.21f);
@@ -546,11 +537,11 @@ static void imuCalculateEstimatedAttitude(timeUs_t currentTimeUs)
         gyroAverage[axis] = gyroGetFilteredDownsampled(axis);
     }
 
-    useAcc = imuIsAccelerometerHealthy(acc.accADC); // all smoothed accADC values are within 20% of 1G
+    useAcc = imuIsAccelerometerHealthy(&acc.accADC); // all smoothed accADC values are within 20% of 1G
 
     imuMahonyAHRSupdate(deltaT * 1e-6f,
                         DEGREES_TO_RADIANS(gyroAverage[X]), DEGREES_TO_RADIANS(gyroAverage[Y]), DEGREES_TO_RADIANS(gyroAverage[Z]),
-                        useAcc, acc.accADC[X], acc.accADC[Y], acc.accADC[Z],
+                        useAcc, acc.accADC.x, acc.accADC.y, acc.accADC.z,
                         useMag,
                         cogYawGain, courseOverGround,  imuCalcKpGain(currentTimeUs, useAcc, gyroAverage));
 
@@ -596,14 +587,14 @@ void imuUpdateAttitude(timeUs_t currentTimeUs)
         mixerSetThrottleAngleCorrection(throttleAngleCorrection);
 
     } else {
-        acc.accADC[X] = 0;
-        acc.accADC[Y] = 0;
-        acc.accADC[Z] = 0;
+        acc.accADC.x = 0;
+        acc.accADC.y = 0;
+        acc.accADC.z = 0;
         schedulerIgnoreTaskStateTime();
     }
 
-    DEBUG_SET(DEBUG_ATTITUDE, X, acc.accADC[X]); // roll
-    DEBUG_SET(DEBUG_ATTITUDE, Y, acc.accADC[Y]); // pitch
+    DEBUG_SET(DEBUG_ATTITUDE, X, acc.accADC.x); // roll
+    DEBUG_SET(DEBUG_ATTITUDE, Y, acc.accADC.y); // pitch
 }
 #endif // USE_ACC
 
@@ -708,20 +699,20 @@ void imuQuaternionMultiplication(quaternion *q1, quaternion *q2, quaternion *res
     result->z = D + (+ E - F - G + H) / 2.0f;
 }
 
-void imuQuaternionHeadfreeTransformVectorEarthToBody(t_fp_vector_def *v)
+void imuQuaternionHeadfreeTransformVectorEarthToBody(vector3_t *v)
 {
     quaternionProducts buffer;
 
     imuQuaternionMultiplication(&offset, &q, &headfree);
     imuQuaternionComputeProducts(&headfree, &buffer);
 
-    const float x = (buffer.ww + buffer.xx - buffer.yy - buffer.zz) * v->X + 2.0f * (buffer.xy + buffer.wz) * v->Y + 2.0f * (buffer.xz - buffer.wy) * v->Z;
-    const float y = 2.0f * (buffer.xy - buffer.wz) * v->X + (buffer.ww - buffer.xx + buffer.yy - buffer.zz) * v->Y + 2.0f * (buffer.yz + buffer.wx) * v->Z;
-    const float z = 2.0f * (buffer.xz + buffer.wy) * v->X + 2.0f * (buffer.yz - buffer.wx) * v->Y + (buffer.ww - buffer.xx - buffer.yy + buffer.zz) * v->Z;
+    const float x = (buffer.ww + buffer.xx - buffer.yy - buffer.zz) * v->x + 2.0f * (buffer.xy + buffer.wz) * v->y + 2.0f * (buffer.xz - buffer.wy) * v->z;
+    const float y = 2.0f * (buffer.xy - buffer.wz) * v->x + (buffer.ww - buffer.xx + buffer.yy - buffer.zz) * v->y + 2.0f * (buffer.yz + buffer.wx) * v->z;
+    const float z = 2.0f * (buffer.xz + buffer.wy) * v->x + 2.0f * (buffer.yz - buffer.wx) * v->y + (buffer.ww - buffer.xx - buffer.yy + buffer.zz) * v->z;
 
-    v->X = x;
-    v->Y = y;
-    v->Z = z;
+    v->x = x;
+    v->y = y;
+    v->z = z;
 }
 
 bool isUpright(void)
