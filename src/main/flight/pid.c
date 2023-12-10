@@ -231,7 +231,7 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .ez_landing_limit = 15,
         .ez_landing_speed = 50,
         .chirp_lag_freq_hz = 3,
-        .chirp_lead_freq_hz = 30,
+        .chirp_lag_freq_hz = 3,        .chirp_lead_freq_hz = 30,
         .chirp_amplitude_roll = 230,
         .chirp_amplitude_pitch = 230,
         .chirp_amplitude_yaw = 180,
@@ -287,7 +287,6 @@ void pidResetIterm(void)
 
 void pidUpdateTpaFactor(float throttle)
 {
-
     static bool isTpaLowFaded = false;
     // don't permit throttle > 1 & throttle < 0 ? is this needed ? can throttle be > 1 or < 0 at this point
     throttle = constrainf(throttle, 0.0f, 1.0f);
