@@ -1500,6 +1500,8 @@ case MSP_NAME:
         // Added in API version 1.43
         sbufWriteU8(dst, gpsConfig()->gps_set_home_point_once);
         sbufWriteU8(dst, gpsConfig()->gps_ublox_use_galileo);
+        // Added in API version 1.47
+        sbufWriteU8(dst, gpsConfig()->gps_ublox_enable_ana);
         break;
 
     case MSP_RAW_GPS:
@@ -2846,6 +2848,12 @@ static mspResult_e mspProcessInCommand(mspDescriptor_t srcDesc, int16_t cmdMSP, 
             gpsConfigMutable()->gps_set_home_point_once = sbufReadU8(src);
             gpsConfigMutable()->gps_ublox_use_galileo = sbufReadU8(src);
         }
+
+        if (sbufBytesRemaining(src) >= 1) {
+            // Added in API version 1.47
+            gpsConfigMutable()->gps_ublox_enable_ana = sbufReadU8(src);
+        }
+
         break;
 #endif
 
