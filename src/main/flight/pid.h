@@ -334,7 +334,6 @@ typedef struct pidRuntime_s {
     float horizonLimitDegreesInv;
     float horizonIgnoreSticks;
     float maxVelocity[XYZ_AXIS_COUNT];
-    float itermWindupPointInv;
     bool inCrashRecoveryMode;
     timeUs_t crashDetectedAtUs;
     timeDelta_t crashTimeLimitUs;
@@ -345,7 +344,9 @@ typedef struct pidRuntime_s {
     float crashDtermThreshold;
     float crashSetpointThreshold;
     float crashLimitYaw;
+    float itermLeakRateYaw;
     float itermLimit;
+    float pidSumLimitYaw;
     bool itermRotation;
     bool zeroThrottleItermReset;
     bool levelRaceMode;
