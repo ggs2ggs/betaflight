@@ -88,7 +88,7 @@ FAST_DATA_ZERO_INIT float throttleBoost;
 pt1Filter_t throttleLpf;
 #endif
 
-PG_REGISTER_WITH_RESET_TEMPLATE(pidConfig_t, pidConfig, PG_PID_CONFIG, 3);
+PG_REGISTER_WITH_RESET_TEMPLATE(pidConfig_t, pidConfig, PG_PID_CONFIG, 4);
 
 #ifndef DEFAULT_PID_PROCESS_DENOM
 #define DEFAULT_PID_PROCESS_DENOM       1
@@ -228,7 +228,8 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .tpa_low_breakpoint = 1050,
         .tpa_low_always = 0,
         .ez_landing_threshold = 25,
-        .ez_landing_limit = 10,
+        .ez_landing_limit = 25,
+        .ez_landing_disarm_threshold = 50,
     );
 
 #ifndef USE_D_MIN
@@ -754,6 +755,16 @@ static float applyEzLanding(float rateToLimit)
 //    const float maxDeflectionAbs = fmaxf(getMaxRcDeflectionAbs(), mixerGetRcThrottle());
     if (maxDeflectionAbs < pidRuntime.ezLandingThreshold) {
         ezLandFactor = fmaxf(pidRuntime.ezLandingLimit, maxDeflectionAbs / pidRuntime.ezLandingThreshold);
+        // if both sticks are inside 20% of the stick threshold, enable auto-disarm on impact
+        // will not disarm on gentle landings
+        // value should be highe enough to avoid unwanted disarms in the air on throttle chops
+        if (pidRuntime.useEzDisarm && ezLandFactor < 0.2) {
+            float accMagnitude = (float) sqrtf(sq(acc.accADC[Z] - acc.dev.acc_1G) + sq(acc.accADC[X]) + sq(acc.accADC[Y])) * acc.dev.acc_1G_rec;
+            if (accMagnitude > pidRuntime.ezLandingDisarmThreshold) {
+                setArmingDisabled(ARMING_DISABLED_ARM_SWITCH);
+                disarm(DISARM_REASON_LANDING);
+            }
+        }
         const float rateLimit = fabsf(ezLandFactor * rateToLimit);
         rateToLimit = constrainf(rateToLimit, -rateLimit, rateLimit);
     }
