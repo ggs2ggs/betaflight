@@ -267,7 +267,7 @@ TEST(pidControllerTest, testPidLoop)
     
         // Disable ezLanding
     simulatedmaxRcDeflectionAbs = 1.0f;
-    calcEzLandingFactor (simulatedmaxRcDeflectionAbs);
+    calcEzLandingLimit (simulatedmaxRcDeflectionAbs);
 
     pidController(pidProfile, currentTestTime());
 
@@ -379,7 +379,7 @@ TEST(pidControllerTest, testEzLanding)
 
     // Enable ezLanding
     simulatedmaxRcDeflectionAbs = 0.01f;   
-    calcEzLandingFactor (simulatedmaxRcDeflectionAbs);
+    calcEzLandingLimit (simulatedmaxRcDeflectionAbs);
     
     pidController(pidProfile, currentTestTime());
 
@@ -438,7 +438,7 @@ TEST(pidControllerTest, testEzLanding)
 
    // Disable ezLanding
     simulatedmaxRcDeflectionAbs = 1.0f;
-    calcEzLandingFactor (simulatedmaxRcDeflectionAbs);
+    calcEzLandingLimit (simulatedmaxRcDeflectionAbs);
 }
 
 TEST(pidControllerTest, testPidLevel)
