@@ -246,6 +246,7 @@ typedef struct pidProfile_s {
     uint8_t ez_landing_threshold;           // Threshold stick position below which motor output is limited
     uint8_t ez_landing_limit;               // Maximum motor output when all sticks centred and throttle zero
     uint8_t ez_landing_speed;               // Speed below which motor output is limited
+
     uint8_t chirp_lag_freq_hz;              // leadlag1Filter cutoff/pole to shape the excitation signal
     uint8_t chirp_lead_freq_hz;             // leadlag1Filter cutoff/zero
     uint16_t chirp_amplitude_roll;          // amplitude roll in degree/second
