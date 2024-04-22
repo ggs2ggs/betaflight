@@ -157,9 +157,9 @@ typedef struct pidProfile_s {
     pidf_t  pid[PID_ITEM_COUNT];
 
     uint8_t dterm_lpf1_type;                // Filter type for dterm lowpass 1
-    uint8_t itermWindupPointPercent;        // iterm windup threshold, percent motor saturation
-    uint16_t pidSumLimit;
-    uint16_t pidSumLimitYaw;
+    uint8_t itermWindup;                    // iterm windup threshold, percentage of pidSumLimit within which to limit iTerm
+    uint16_t pidSumLimit;                   // pidSum limit value for yaw
+    uint16_t pidSumLimitYaw;                // pidSum limit value for yaw
     uint8_t pidAtMinThrottle;               // Disable/Enable pids on zero throttle. Normally even without airmode P and D would be active.
     uint8_t angle_limit;                    // Max angle in degrees in Angle mode
 
@@ -264,6 +264,7 @@ typedef struct pidProfile_s {
     uint16_t spa_center[XYZ_AXIS_COUNT];    // RPY setpoint at which PIDs are reduced to 50% (setpoint PID attenuation)
     uint16_t spa_width[XYZ_AXIS_COUNT];     // Width of smooth transition around spa_center
     uint8_t spa_mode[XYZ_AXIS_COUNT];       // SPA mode for each axis
+    uint8_t itermLeak;                      // Fractional rate at which iTerm on yaw leaks towards zero, arbitrary units
 } pidProfile_t;
 
 PG_DECLARE_ARRAY(pidProfile_t, PID_PROFILE_COUNT, pidProfiles);
@@ -346,7 +347,7 @@ typedef struct pidRuntime_s {
     float crashLimitYaw;
     float itermLeakRateYaw;
     float itermLimit;
-    float pidSumLimitYaw;
+    float itermLimitYaw;
     bool itermRotation;
     bool zeroThrottleItermReset;
     bool levelRaceMode;
