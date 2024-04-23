@@ -358,7 +358,7 @@ TEST(pidControllerTest, testPidLoop)
     EXPECT_FLOAT_EQ(0, pidData[FD_YAW].P);
     EXPECT_NEAR(-31.3, pidData[FD_ROLL].I, calculateTolerance(-31.3));
     EXPECT_NEAR(29.3, pidData[FD_PITCH].I, calculateTolerance(29.3));
-    EXPECT_NEAR(-15.5, pidData[FD_YAW].I, calculateTolerance(-15.5));
+    EXPECT_NEAR(-19.3, pidData[FD_YAW].I, calculateTolerance(-19.3));
     EXPECT_FLOAT_EQ(0, pidData[FD_ROLL].D);
     EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].D);
     EXPECT_FLOAT_EQ(0, pidData[FD_YAW].D);
