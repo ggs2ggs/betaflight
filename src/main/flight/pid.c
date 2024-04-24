@@ -759,7 +759,6 @@ float pidGetAirmodeThrottleOffset(void)
 #endif
 
 
-
 // ezLanding stuff
 static bool applyEzLandingLimiting = false;
 static float ezLandingLimit = PIDSUM_LIMIT;
@@ -767,7 +766,7 @@ static float maxDeflectionAbs = 1.0f;
 
 // EzLanding factors are updated only when new Rx data is received in rc.c
 // this will cause steps in PID as the limiting value changes
-void calcEzLandingLimit(float maxRcDeflectionAbs)
+FAST_CODE_NOINLINE void calcEzLandingLimit(float maxRcDeflectionAbs)
 {
     if (pidRuntime.useEzLanding && !isFlipOverAfterCrashActive()) {
         maxDeflectionAbs = fmaxf(maxRcDeflectionAbs, mixerGetRcThrottle());
@@ -783,8 +782,7 @@ void calcEzLandingLimit(float maxRcDeflectionAbs)
     DEBUG_SET(DEBUG_EZLANDING, 1, maxDeflectionAbs * 100);
 }
 
-
-static void disarmOnImpact(void)
+static FAST_CODE_NOINLINE void disarmOnImpact(void)
 {
     // if both sticks are within 5% of center, check acc magnitude for impacts
     // at half the impact threshold, force iTerm to zero, to attenuate iTerm-mediated bouncing
@@ -803,7 +801,6 @@ static void disarmOnImpact(void)
         }
     }
 }
-
 
 #ifdef USE_LAUNCH_CONTROL
 #define LAUNCH_CONTROL_MAX_RATE 100.0f
