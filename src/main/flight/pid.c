@@ -88,7 +88,7 @@ FAST_DATA_ZERO_INIT float throttleBoost;
 pt1Filter_t throttleLpf;
 #endif
 
-PG_REGISTER_WITH_RESET_TEMPLATE(pidConfig_t, pidConfig, PG_PID_CONFIG, 3);
+PG_REGISTER_WITH_RESET_TEMPLATE(pidConfig_t, pidConfig, PG_PID_CONFIG, 4);
 
 #ifndef DEFAULT_PID_PROCESS_DENOM
 #define DEFAULT_PID_PROCESS_DENOM       1
@@ -229,7 +229,7 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .tpa_low_always = 0,
         .ez_landing_threshold = 25,
         .ez_landing_limit = 15,
-        .ez_landing_speed = 50,
+        .ez_landing_disarm_threshold = 110,
     );
 
 #ifndef USE_D_MIN
@@ -479,6 +479,7 @@ static FAST_CODE_NOINLINE void detectAndSetCrashRecovery(
 {
     // if crash recovery is on and accelerometer enabled and there is no gyro overflow, then check for a crash
     // no point in trying to recover if the crash is so severe that the gyro overflows
+    // automatically enable in a GPS Rescue, in case we hit a tree or a person
     if ((crash_recovery || FLIGHT_MODE(GPS_RESCUE_MODE)) && !gyroOverflowDetected()) {
         if (ARMING_FLAG(ARMED)) {
             if (getMotorMixRange() >= 1.0f && !pidRuntime.inCrashRecoveryMode
@@ -741,6 +742,50 @@ float pidGetAirmodeThrottleOffset(void)
 }
 #endif
 
+
+// ezLanding stuff
+static bool applyEzLandingLimiting = false;
+static float ezLandingLimit = PIDSUM_LIMIT;
+static float maxDeflectionAbs = 1.0f;
+
+// EzLanding factors are updated only when new Rx data is received in rc.c
+// this will cause steps in PID as the limiting value changes
+FAST_CODE_NOINLINE void calcEzLandingLimit(float maxRcDeflectionAbs)
+{
+    if (pidRuntime.useEzLanding && !isFlipOverAfterCrashActive()) {
+        maxDeflectionAbs = fmaxf(maxRcDeflectionAbs, mixerGetRcThrottle());
+        if (maxDeflectionAbs < pidRuntime.ezLandingThreshold) {
+            ezLandingLimit = fmaxf(pidRuntime.ezLandingLimit, PIDSUM_LIMIT * maxDeflectionAbs / pidRuntime.ezLandingThreshold);
+            // 15-500 with defaults
+            applyEzLandingLimiting = true;
+        } else {
+            applyEzLandingLimiting = false;
+        }
+    }
+    DEBUG_SET(DEBUG_EZLANDING, 0, ezLandingLimit * 100);
+    DEBUG_SET(DEBUG_EZLANDING, 1, maxDeflectionAbs * 100);
+}
+
+static FAST_CODE_NOINLINE void disarmOnImpact(void)
+{
+    // if both sticks are within 5% of center, check acc magnitude for impacts
+    // at half the impact threshold, force iTerm to zero, to attenuate iTerm-mediated bouncing
+    // threshold should be highe enough to avoid unwanted disarms in the air on throttle chops
+    if (isAirmodeActivated() && maxDeflectionAbs < 0.05f) {
+        float accMagnitude = sqrtf(sq(acc.accADC[Z]) + sq(acc.accADC[X]) + sq(acc.accADC[Y])) * acc.dev.acc_1G_rec - 1.0f;
+        DEBUG_SET(DEBUG_EZLANDING, 4, lrintf(accMagnitude * 10));
+        if (accMagnitude > pidRuntime.ezLandingDisarmThreshold) {
+            // disarm after big bumps
+            setArmingDisabled(ARMING_DISABLED_ARM_SWITCH);
+            disarm(DISARM_REASON_LANDING);
+        } else if (accMagnitude > (0.3f * pidRuntime.ezLandingDisarmThreshold)) {
+            // force iTerm to zero on all axes on smaller bumps
+            pidResetIterm();
+            // after reset, iTerm will slowly re-accumulate
+        }
+    }
+}
+
 #ifdef USE_LAUNCH_CONTROL
 #define LAUNCH_CONTROL_MAX_RATE 100.0f
 #define LAUNCH_CONTROL_MIN_RATE 5.0f
@@ -882,6 +927,10 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
     rpmFilterUpdate();
 #endif
 
+    if (pidRuntime.useEzDisarm) {
+        disarmOnImpact();
+    }
+
     // ----------PID controller----------
     for (int axis = FD_ROLL; axis <= FD_YAW; ++axis) {
 
@@ -951,6 +1000,7 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 
         const float previousIterm = pidData[axis].I;
         float itermErrorRate = errorRate;
+
 #ifdef USE_ABSOLUTE_CONTROL
         const float uncorrectedSetpoint = currentPidSetpoint;
 #endif
@@ -964,6 +1014,18 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
 #ifdef USE_ABSOLUTE_CONTROL
         const float setpointCorrection = currentPidSetpoint - uncorrectedSetpoint;
 #endif
+
+        // *** EzLanding error limiter on error for P ***
+        if (axis == FD_ROLL) {
+            DEBUG_SET(DEBUG_EZLANDING, 2, errorRate); // before attenuation
+        }
+        if (applyEzLandingLimiting) {
+            errorRate = constrainf(errorRate, -ezLandingLimit, ezLandingLimit);
+
+        }
+        if (axis == FD_ROLL) {
+            DEBUG_SET(DEBUG_EZLANDING, 3, errorRate); // after attenuation
+        }
 
         // --------low-level gyro-based PID based on 2DOF PID controller. ----------
 
@@ -987,6 +1049,13 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
                 pidRuntime.itermAccelerator = 0.0f; // no antigravity on yaw iTerm
             }
         }
+
+        // *** EzLanding error limiter on error for the input to the ITerm accumulator ***
+        //  - unfortunately iTermErrorRate is different from errorRate used by P, otherwise this is wasteful
+        if (applyEzLandingLimiting) {
+            itermErrorRate = constrainf(itermErrorRate, -ezLandingLimit, ezLandingLimit);
+        }
+
         const float iTermChange = (Ki + pidRuntime.itermAccelerator) * dynCi * pidRuntime.dT * itermErrorRate;
         pidData[axis].I = constrainf(previousIterm + iTermChange, -pidRuntime.itermLimit, pidRuntime.itermLimit);
 
@@ -1052,6 +1121,12 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, timeUs_t currentTim
             // Apply the dMinFactor
             preTpaD *= dMinFactor;
 #endif
+
+            // *** EzLanding limiter on DTerm ***
+            if (applyEzLandingLimiting) {
+                preTpaD = constrainf(preTpaD, -ezLandingLimit, ezLandingLimit);
+            }
+
             pidData[axis].D = preTpaD * pidRuntime.tpaFactor;
 
             // Log the value of D pre application of TPA
