@@ -18,25 +18,14 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "platform.h"
+/*
+ * Author: Dominic Clifton - Sync generation, Sync Detection, Video Overlay and first-cut of working Pixel OSD system.
+ */
+#pragma once
 
-#include "pg/pg.h"
-#include "pg/pg_ids.h"
+#include "drivers/display_canvas.h"
 
-#include "drivers/osd.h"
+void simple_artificial_horizon(displayCanvas_t *canvas, int16_t roll, int16_t pitch, int16_t x, int16_t y,
+        int16_t width, int16_t height, int8_t max_pitch, uint8_t n_pitch_steps);
 
-#include "vcd.h"
-
-// no template required since defaults are zero
-PG_REGISTER_WITH_RESET_FN(vcdProfile_t, vcdProfile, PG_VCD_CONFIG, 0);
-
-void pgResetFn_vcdProfile(vcdProfile_t *vcdProfile)
-{
-#if defined(USE_OSD_HD) && !defined(USE_SPRACING_PIXEL_OSD)
-    // Make it obvious on the configurator that the FC doesn't support HD
-    vcdProfile->video_system = VIDEO_SYSTEM_HD;
-#else
-    vcdProfile->video_system = VIDEO_SYSTEM_AUTO;
-#endif
-
-}
+void lqgraph_render(displayCanvas_t *canvas, uint32_t bitArray[], uint8_t lqBitCount, int16_t x, int16_t y);

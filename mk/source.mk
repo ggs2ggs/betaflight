@@ -179,6 +179,8 @@ COMMON_SRC = \
             osd/osd.c \
             osd/osd_elements.c \
             osd/osd_warnings.c \
+            osd/osd_elements_canvas.c \
+            osd/pixel_osd_video.c \
             sensors/barometer.c \
             sensors/rangefinder.c \
             telemetry/telemetry.c \
@@ -472,6 +474,26 @@ SRC += $(wildcard $(DSP_LIB)/Source/*/*.S)
 endif
 
 SRC += $(FLASH_SRC) $(MSC_SRC) $(SDCARD_SRC) $(COMMON_SRC)
+
+ifneq ($(SPRACING_PIXEL_OSD),)
+
+SPRACING_PIXEL_OSD_SRC = \
+            drivers/spracingpixelosd/spracing_pixel_osd_library.c \
+            drivers/spracingpixelosd/spracing_pixel_osd.c \
+            drivers/spracingpixelosd/framebuffer.c \
+            drivers/spracingpixelosd/framebuffer_canvas.c \
+            io/displayport_spracing_pixel_osd.c \
+            drivers/osd/fonts.c \
+            drivers/osd/font_max7456_12x18_betaflight.c \
+
+SPRACINGPIXELOSDLIB_DIR := $(ROOT)/lib/main/spracingpixelosd
+
+INCLUDE_DIRS    += $(SPRACINGPIXELOSDLIB_DIR)/include
+VPATH           := $(VPATH):$(SPRACINGPIXELOSDLIB_DIR)/include
+
+SRC += $(SPRACING_PIXEL_OSD_SRC)
+
+endif
 
 #excludes
 SRC   := $(filter-out $(MCU_EXCLUDES), $(SRC))

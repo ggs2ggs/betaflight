@@ -32,6 +32,7 @@ typedef enum {
     DISPLAYPORT_DEVICE_TYPE_CRSF,
     DISPLAYPORT_DEVICE_TYPE_HOTT,
     DISPLAYPORT_DEVICE_TYPE_SRXL,
+    DISPLAYPORT_DEVICE_TYPE_SPRACINGPIXELOSD,
 } displayPortDeviceType_e;
 
 typedef enum {
@@ -113,6 +114,7 @@ typedef struct displayPort_s {
 
     // Displayport device capability
     bool useDeviceBlink;
+    uint8_t frameBufferCount;
 
     // The type of display device
     displayPortDeviceType_e deviceType;

@@ -18,25 +18,25 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
+/*
+ * Author: Dominic Clifton / Seriously Pro Racing
+ */
 #include "platform.h"
+
+#ifdef USE_SPRACING_PIXEL_OSD
 
 #include "pg/pg.h"
 #include "pg/pg_ids.h"
 
-#include "drivers/osd.h"
+#include "drivers/io.h"
+#include "drivers/bus_spi.h"
 
-#include "vcd.h"
+#include "spracing_pixel_osd.h"
 
-// no template required since defaults are zero
-PG_REGISTER_WITH_RESET_FN(vcdProfile_t, vcdProfile, PG_VCD_CONFIG, 0);
+PG_REGISTER_WITH_RESET_FN(spracingPixelOSDConfig_t, spracingPixelOSDConfig, PG_SPRACING_PIXEL_OSD_CONFIG, 0);
 
-void pgResetFn_vcdProfile(vcdProfile_t *vcdProfile)
+void pgResetFn_spracingPixelOSDConfig(spracingPixelOSDConfig_t *config)
 {
-#if defined(USE_OSD_HD) && !defined(USE_SPRACING_PIXEL_OSD)
-    // Make it obvious on the configurator that the FC doesn't support HD
-    vcdProfile->video_system = VIDEO_SYSTEM_HD;
-#else
-    vcdProfile->video_system = VIDEO_SYSTEM_AUTO;
-#endif
-
+    config->unused = 0;
 }
+#endif // USE_SPRACING_PIXEL_OSD

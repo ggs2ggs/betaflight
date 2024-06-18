@@ -157,11 +157,13 @@
 #include "osd/osd.h"
 #include "osd/osd_elements.h"
 #include "osd/osd_warnings.h"
+#include "osd/osd_elements_canvas.h"
 
 #include "pg/motor.h"
 #include "pg/stats.h"
 
 #include "rx/rx.h"
+#include "rx/expresslrs_common.h"
 
 #include "sensors/adcinternal.h"
 #include "sensors/barometer.h"
@@ -227,6 +229,10 @@ static const char compassBar[] = {
 static unsigned activeOsdElementCount = 0;
 static uint8_t activeOsdElementArray[OSD_ITEM_COUNT];
 static bool backgroundLayerSupported = false;
+
+#ifdef USE_CANVAS
+static displayCanvas_t *canvas = NULL;
+#endif
 
 // Blink control
 #define OSD_BLINK_FREQUENCY_HZ 2
@@ -713,34 +719,53 @@ static void osdElementAntiGravity(osdElementParms_t *element)
 
 static void osdElementArtificialHorizon(osdElementParms_t *element)
 {
-    static int x = -4;
-    // Get pitch and roll limits in tenths of degrees
-    const int maxPitch = osdConfig()->ahMaxPitch * 10;
-    const int maxRoll = osdConfig()->ahMaxRoll * 10;
-    const int ahSign = osdConfig()->ahInvert ? -1 : 1;
-    const int rollAngle = constrain(attitude.values.roll * ahSign, -maxRoll, maxRoll);
-    int pitchAngle = constrain(attitude.values.pitch * ahSign, -maxPitch, maxPitch);
-    // Convert pitchAngle to y compensation value
-    // (maxPitch / 25) divisor matches previous settings of fixed divisor of 8 and fixed max AHI pitch angle of 20.0 degrees
-    if (maxPitch > 0) {
-        pitchAngle = ((pitchAngle * 25) / maxPitch);
-    }
-    pitchAngle -= 41; // 41 = 4 * AH_SYMBOL_COUNT + 5
+    #if defined(USE_CANVAS) && defined(USE_CANVAS_OSD)
+    // once a pattern emerges with regards to different code for canvas or character bases elements it might be worth pre-determining the drawing methods
+    // based on canvas support in the OSD init code, instead of repeating the `if (canvas) ...` and `#ifdef USE_CANVAS...` everywhere
+    if (canvas) {
+        const int afhWidth = 9 * canvas->gridElementWidth;
+        const int afhHeight = 7 * canvas->gridElementHeight;
 
-    const int y = ((-rollAngle * x) / 64) - pitchAngle;
-    if (y >= 0 && y <= 81) {
-        osdDisplayWriteChar(element, element->elemPosX + x, element->elemPosY + (y / AH_SYMBOL_COUNT), DISPLAYPORT_SEVERITY_NORMAL, (SYM_AH_BAR9_0 + (y % AH_SYMBOL_COUNT)));
-    }
-
-    if (x == 4) {
-        // Rendering is complete, so prepare to start again
-        x = -4;
+        // elemPosX = center, element->elemPosY = top.
+        simple_artificial_horizon(canvas,
+            attitude.values.roll, -1 * attitude.values.pitch,
+            (element->elemPosX+1) * canvas->gridElementWidth, (element->elemPosY+1) * canvas->gridElementHeight + (afhHeight/2),
+            afhWidth, afhHeight,
+            30,
+            2
+        );
     } else {
-        // Rendering not yet complete
-        element->rendered = false;
-        x++;
-    }
+#endif
+        static int x = -4;
+        // Get pitch and roll limits in tenths of degrees
+        const int maxPitch = osdConfig()->ahMaxPitch * 10;
+        const int maxRoll = osdConfig()->ahMaxRoll * 10;
+        const int ahSign = osdConfig()->ahInvert ? -1 : 1;
+        const int rollAngle = constrain(attitude.values.roll * ahSign, -maxRoll, maxRoll);
+        int pitchAngle = constrain(attitude.values.pitch * ahSign, -maxPitch, maxPitch);
+        // Convert pitchAngle to y compensation value
+        // (maxPitch / 25) divisor matches previous settings of fixed divisor of 8 and fixed max AHI pitch angle of 20.0 degrees
+        if (maxPitch > 0) {
+            pitchAngle = ((pitchAngle * 25) / maxPitch);
+        }
+        pitchAngle -= 41; // 41 = 4 * AH_SYMBOL_COUNT + 5
 
+        const int y = ((-rollAngle * x) / 64) - pitchAngle;
+        if (y >= 0 && y <= 81) {
+            osdDisplayWriteChar(element, element->elemPosX + x, element->elemPosY + (y / AH_SYMBOL_COUNT), DISPLAYPORT_SEVERITY_NORMAL, (SYM_AH_BAR9_0 + (y % AH_SYMBOL_COUNT)));
+        }
+
+        if (x == 4) {
+            // Rendering is complete, so prepare to start again
+            x = -4;
+        } else {
+            // Rendering not yet complete
+            element->rendered = false;
+            x++;
+        }
+#if defined(USE_CANVAS) && defined(USE_CANVAS_OSD)
+    }
+#endif
     element->drawElement = false;  // element already drawn
 }
 
@@ -1759,6 +1784,30 @@ static void osdElementWarnings(osdElementParms_t *element)
 #endif // USE_CRAFTNAME_MSGS
 }
 
+#ifdef USE_RX_EXPRESSLRS
+static void osdElementLQGraph(osdElementParms_t *element)
+{
+#if defined(USE_CANVAS) && defined(USE_CANVAS_OSD)
+    if (canvas) {
+
+        uint8_t lqBitCount;
+        uint32_t *lqArray = lqGetArray(&lqBitCount);
+
+        lqgraph_render(canvas,
+            lqArray, lqBitCount,
+            element->elemPosX * canvas->gridElementWidth, element->elemPosY * canvas->gridElementHeight
+        );
+
+    } else {
+#endif
+        // No character based implementation
+#if defined(USE_CANVAS) && defined(USE_CANVAS_OSD)
+    }
+#endif
+    element->drawElement = false;  // element already drawn
+}
+#endif
+
 #ifdef USE_MSP_DISPLAYPORT
 static void osdElementSys(osdElementParms_t *element)
 {
@@ -1829,6 +1878,9 @@ static const uint8_t osdElementDisplayOrder[] = {
 #endif
 #ifdef USE_RX_LINK_QUALITY_INFO
     OSD_LINK_QUALITY,
+#endif
+#ifdef USE_RX_EXPRESSLRS
+    OSD_LQ_GRAPH,
 #endif
 #ifdef USE_RX_LINK_UPLINK_POWER
     OSD_TX_UPLINK_POWER,
@@ -1954,6 +2006,9 @@ const osdElementDrawFn osdElementDrawFunction[OSD_ITEM_COUNT] = {
 #endif
 #ifdef USE_RX_LINK_QUALITY_INFO
     [OSD_LINK_QUALITY]            = osdElementLinkQuality,
+#endif
+#ifdef USE_RX_EXPRESSLRS
+    [OSD_LQ_GRAPH]                = osdElementLQGraph,
 #endif
 #ifdef USE_RX_LINK_UPLINK_POWER
     [OSD_TX_UPLINK_POWER]         = osdElementTxUplinkPower,
@@ -2316,6 +2371,13 @@ void osdSyncBlink(void)
         blinkState = !blinkState;
     }
 }
+
+#ifdef USE_CANVAS
+void osdCanvasInit(displayCanvas_t *canvasInstance)
+{
+    canvas = canvasInstance;
+}
+#endif
 
 void osdResetAlarms(void)
 {

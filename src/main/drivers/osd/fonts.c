@@ -18,25 +18,14 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
+
+#include <stdbool.h>
+#include <stdint.h>
+
 #include "platform.h"
 
-#include "pg/pg.h"
-#include "pg/pg_ids.h"
+#include "drivers/osd/font_max7456_12x18.h"
 
-#include "drivers/osd.h"
+#include "drivers/osd/fonts.h"
 
-#include "vcd.h"
-
-// no template required since defaults are zero
-PG_REGISTER_WITH_RESET_FN(vcdProfile_t, vcdProfile, PG_VCD_CONFIG, 0);
-
-void pgResetFn_vcdProfile(vcdProfile_t *vcdProfile)
-{
-#if defined(USE_OSD_HD) && !defined(USE_SPRACING_PIXEL_OSD)
-    // Make it obvious on the configurator that the FC doesn't support HD
-    vcdProfile->video_system = VIDEO_SYSTEM_HD;
-#else
-    vcdProfile->video_system = VIDEO_SYSTEM_AUTO;
-#endif
-
-}
+const uint8_t *font_max7456_12x18 = &font_max7456_12x18_betaflight[0];

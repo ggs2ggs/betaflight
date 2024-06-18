@@ -18,25 +18,26 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "platform.h"
+/*
+ * Author: Dominic Clifton - Sync generation, Sync Detection, Video Overlay and first-cut of working Pixel OSD system.
+ */
 
-#include "pg/pg.h"
-#include "pg/pg_ids.h"
+#pragma once
 
-#include "drivers/osd.h"
+#ifdef USE_SPRACING_PIXEL_OSD
+#include "spracingpixelosd_api.h"
 
-#include "vcd.h"
+#include "drivers/display.h"
+#include "pg/vcd.h"
 
-// no template required since defaults are zero
-PG_REGISTER_WITH_RESET_FN(vcdProfile_t, vcdProfile, PG_VCD_CONFIG, 0);
+void spracingPixelOSDIOInit(void);
+bool spracingPixelOSDInit(const vcdProfile_t *vcdProfile);
 
-void pgResetFn_vcdProfile(vcdProfile_t *vcdProfile)
-{
-#if defined(USE_OSD_HD) && !defined(USE_SPRACING_PIXEL_OSD)
-    // Make it obvious on the configurator that the FC doesn't support HD
-    vcdProfile->video_system = VIDEO_SYSTEM_HD;
-#else
-    vcdProfile->video_system = VIDEO_SYSTEM_AUTO;
+void spracingPixelOSDRenderDebugOverlay(uint8_t *frameBuffer, spracingPixelOSDFrameState_t* frameState, spracingPixelOSDSyncVoltages_t *syncVoltages);
+
+void spracingPixelOSDBeginRendering(void);
+void spracingPixelOSDEndRendering(void);
+bool spracingPixelOSDIsFrameRenderingComplete();
+
+uint8_t *spracingPixelOSDGetActiveFrameBuffer(void);
 #endif
-
-}
