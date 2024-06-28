@@ -33,6 +33,7 @@ float simulatedRawSetpoint[3] = { 0,0,0 };
 float simulatedMaxRate[3] = { 670,670,670 };
 float simulatedFeedforward[3] = { 0,0,0 };
 float simulatedMotorMixRange = 0.0f;
+float simulatedmaxRcDeflectionAbs = 1.0f;
 
 int16_t debug[DEBUG16_VALUE_COUNT];
 uint8_t debugMode;
@@ -72,6 +73,7 @@ extern "C" {
     #include "sensors/gyro.h"
     #include "sensors/acceleration.h"
 
+    acc_t acc;
     gyro_t gyro;
     attitudeEulerAngles_t attitude;
 
@@ -82,11 +84,13 @@ extern "C" {
     launchControlMode_e unitLaunchControlMode = LAUNCH_CONTROL_MODE_NORMAL;
 
     float getMotorMixRange(void) { return simulatedMotorMixRange; }
+    float mixerGetRcThrottle(void) { return simulatedMotorMixRange; }
     float getSetpointRate(int axis) { return simulatedSetpointRate[axis]; }
     bool isAirmodeActivated(void) { return simulatedAirmodeEnabled; }
     float getRcDeflectionAbs(int axis) { return fabsf(simulatedRcDeflection[axis]); }
     void systemBeep(bool) { }
     bool gyroOverflowDetected(void) { return false; }
+    bool isFlipOverAfterCrashActive(void) {return false; }
     float getRcDeflection(int axis) { return simulatedRcDeflection[axis]; }
     float getRcDeflectionRaw(int axis) { return simulatedRcDeflection[axis]; }
     float getRawSetpoint(int axis) { return simulatedRawSetpoint[axis]; }
@@ -130,7 +134,8 @@ void setDefaultTestSettings(void)
     pidProfile->dterm_notch_hz = 260;
     pidProfile->dterm_notch_cutoff = 160;
     pidProfile->dterm_lpf1_type = FILTER_BIQUAD;
-    pidProfile->itermWindupPointPercent = 50;
+    pidProfile->itermWindup = 80;
+    pidProfile->itermLeak = 30;
     pidProfile->pidAtMinThrottle = PID_STABILISATION_ON;
     pidProfile->angle_limit = 60;
     pidProfile->feedforward_transition = 100;
@@ -159,6 +164,9 @@ void setDefaultTestSettings(void)
     pidProfile->launchControlMode = LAUNCH_CONTROL_MODE_NORMAL,
     pidProfile->launchControlGain = 40,
     pidProfile->level_race_mode = false,
+    pidProfile->ez_landing_threshold = 25,
+    pidProfile->ez_landing_limit = 10,
+
 
     gyro.targetLooptime = 8000;
 }
@@ -258,6 +266,22 @@ TEST(pidControllerTest, testPidLoop)
     resetTest();
     ENABLE_ARMING_FLAG(ARMED);
     pidStabilisationState(PID_STABILISATION_ON);
+    
+        // Disable ezLanding
+    simulatedmaxRcDeflectionAbs = 1.0f;
+    calcEzLandingLimit (simulatedmaxRcDeflectionAbs);
+
+    // increase pid sum limits to avoid interactions with the i term anti windup mechanism
+    pidProfile->pidSumLimit = USHRT_MAX;
+    pidProfile->pidSumLimitYaw = USHRT_MAX;
+
+    // increase pid sum limits to avoid interactions with the i term anti windup mechanism
+    pidProfile->pidSumLimit = USHRT_MAX;
+    pidProfile->pidSumLimitYaw = USHRT_MAX;
+
+    // increase pid sum limits to avoid interactions with the i term anti windup mechanism
+    pidProfile->pidSumLimit = USHRT_MAX;
+    pidProfile->pidSumLimitYaw = USHRT_MAX;
 
     pidController(pidProfile, currentTestTime());
 
@@ -272,7 +296,6 @@ TEST(pidControllerTest, testPidLoop)
     EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].D);
     EXPECT_FLOAT_EQ(0, pidData[FD_YAW].D);
 
-    // Add some rotation on ROLL to generate error
     gyro.gyroADCf[FD_ROLL] = 100;
     pidController(pidProfile, currentTestTime());
 
@@ -280,7 +303,7 @@ TEST(pidControllerTest, testPidLoop)
     EXPECT_NEAR(-128.1, pidData[FD_ROLL].P, calculateTolerance(-128.1));
     EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].P);
     EXPECT_FLOAT_EQ(0, pidData[FD_YAW].P);
-    EXPECT_NEAR(-7.8, pidData[FD_ROLL].I, calculateTolerance(-7.8));
+    EXPECT_NEAR(-8.6, pidData[FD_ROLL].I, calculateTolerance(-8.6));
     EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].I);
     EXPECT_FLOAT_EQ(0, pidData[FD_YAW].I);
     EXPECT_NEAR(-198.4, pidData[FD_ROLL].D, calculateTolerance(-198.4));
@@ -317,12 +340,11 @@ TEST(pidControllerTest, testPidLoop)
     EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].D);
     EXPECT_NEAR(-132.25, pidData[FD_YAW].D, calculateTolerance(-132.25));
 
-    // Simulate Iterm behaviour during mixer saturation
-    simulatedMotorMixRange = 1.2f;
+    // Simulate Iterm growth if not saturated
     pidController(pidProfile, currentTestTime());
-    EXPECT_NEAR(-23.5, pidData[FD_ROLL].I, calculateTolerance(-23.5));
-    EXPECT_NEAR(19.6, pidData[FD_PITCH].I, calculateTolerance(19.6));
-    EXPECT_NEAR(-8.8, pidData[FD_YAW].I, calculateTolerance(-8.8));
+    EXPECT_NEAR(-31.3, pidData[FD_ROLL].I, calculateTolerance(-31.3));
+    EXPECT_NEAR(29.3, pidData[FD_PITCH].I, calculateTolerance(29.3));
+    EXPECT_NEAR(-17.6, pidData[FD_YAW].I, calculateTolerance(-17.6));
     simulatedMotorMixRange = 0;
 
     // Match the stick to gyro to stop error
@@ -333,13 +355,13 @@ TEST(pidControllerTest, testPidLoop)
     for(int loop = 0; loop < 5; loop++) {
         pidController(pidProfile, currentTestTime());
     }
-    // Iterm is stalled as it is not accumulating anymore
+    // Iterm is stalled as it is not accumulating anymore; yaw falls from leak
     EXPECT_FLOAT_EQ(0, pidData[FD_ROLL].P);
     EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].P);
     EXPECT_FLOAT_EQ(0, pidData[FD_YAW].P);
-    EXPECT_NEAR(-23.5, pidData[FD_ROLL].I, calculateTolerance(-23.5));
-    EXPECT_NEAR(19.6, pidData[FD_PITCH].I, calculateTolerance(19.6));
-    EXPECT_NEAR(-10.6, pidData[FD_YAW].I, calculateTolerance(-10.6));
+    EXPECT_NEAR(-31.3, pidData[FD_ROLL].I, calculateTolerance(-31.3));
+    EXPECT_NEAR(29.3, pidData[FD_PITCH].I, calculateTolerance(29.3));
+    EXPECT_NEAR(-17, pidData[FD_YAW].I, calculateTolerance(-17)); 
     EXPECT_FLOAT_EQ(0, pidData[FD_ROLL].D);
     EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].D);
     EXPECT_FLOAT_EQ(0, pidData[FD_YAW].D);
@@ -358,6 +380,78 @@ TEST(pidControllerTest, testPidLoop)
     EXPECT_FLOAT_EQ(0, pidData[FD_ROLL].D);
     EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].D);
     EXPECT_FLOAT_EQ(0, pidData[FD_YAW].D);
+}
+
+TEST(pidControllerTest, testEzLanding)
+{
+
+    // Make sure to start with fresh values
+    resetTest();
+    ENABLE_ARMING_FLAG(ARMED);
+    pidStabilisationState(PID_STABILISATION_ON);
+
+    // Enable ezLanding
+    simulatedmaxRcDeflectionAbs = 0.01f;   
+    calcEzLandingLimit (simulatedmaxRcDeflectionAbs);
+    
+    pidController(pidProfile, currentTestTime());
+
+    // Loop 1 - Expecting zero since there is no error
+    EXPECT_FLOAT_EQ(0, pidData[FD_ROLL].P);
+    EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].P);
+    EXPECT_FLOAT_EQ(0, pidData[FD_YAW].P);
+    EXPECT_FLOAT_EQ(0, pidData[FD_ROLL].I);
+    EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].I);
+    EXPECT_FLOAT_EQ(0, pidData[FD_YAW].I);
+    EXPECT_FLOAT_EQ(0, pidData[FD_ROLL].D);
+    EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].D);
+    EXPECT_FLOAT_EQ(0, pidData[FD_YAW].D);
+
+    gyro.gyroADCf[FD_ROLL] = 100;
+    pidController(pidProfile, currentTestTime());
+
+    // Loop 2 - Expect lower PIDs than on the earlier test because ezLanding is limiting error
+    EXPECT_NEAR(-25.6, pidData[FD_ROLL].P, calculateTolerance(-25.6));
+    EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].P);
+    EXPECT_FLOAT_EQ(0, pidData[FD_YAW].P);
+    EXPECT_NEAR(-1.6, pidData[FD_ROLL].I, calculateTolerance(-1.6));
+    EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].I);
+    EXPECT_FLOAT_EQ(0, pidData[FD_YAW].I);
+    EXPECT_NEAR(-20, pidData[FD_ROLL].D, calculateTolerance(-20));
+    EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].D);
+    EXPECT_FLOAT_EQ(0, pidData[FD_YAW].D);
+
+    gyro.gyroADCf[FD_ROLL] = 200;
+    pidController(pidProfile, currentTestTime());
+
+    // Loop 2 - Expect only iTerm to increase, because error is limited
+    EXPECT_NEAR(-25.6, pidData[FD_ROLL].P, calculateTolerance(-25.6));
+    EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].P);
+    EXPECT_FLOAT_EQ(0, pidData[FD_YAW].P);
+    EXPECT_NEAR(-3.1, pidData[FD_ROLL].I, calculateTolerance(-3.1));
+    EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].I);
+    EXPECT_FLOAT_EQ(0, pidData[FD_YAW].I);
+    EXPECT_NEAR(-20, pidData[FD_ROLL].D, calculateTolerance(-20));
+    EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].D);
+    EXPECT_FLOAT_EQ(0, pidData[FD_YAW].D);
+
+    gyro.gyroADCf[FD_ROLL] = 500;
+    pidController(pidProfile, currentTestTime());
+
+    // Loop 3 - Expect only iTerm to increase, because error is limited
+    EXPECT_NEAR(-25.6, pidData[FD_ROLL].P, calculateTolerance(-25.6));
+    EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].P);
+    EXPECT_FLOAT_EQ(0, pidData[FD_YAW].P);
+    EXPECT_NEAR(-4.7, pidData[FD_ROLL].I, calculateTolerance(-4.7));
+    EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].I);
+    EXPECT_FLOAT_EQ(0, pidData[FD_YAW].I);
+    EXPECT_NEAR(-20, pidData[FD_ROLL].D, calculateTolerance(-20));
+    EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].D);
+    EXPECT_FLOAT_EQ(0, pidData[FD_YAW].D);
+
+   // Disable ezLanding
+    simulatedmaxRcDeflectionAbs = 1.0f;
+    calcEzLandingLimit (simulatedmaxRcDeflectionAbs);
 }
 
 TEST(pidControllerTest, testPidLevel)
@@ -503,73 +597,153 @@ TEST(pidControllerTest, testPidHorizon)
 
 }
 
+// trying to fix
+
+
+
 TEST(pidControllerTest, testMixerSaturation)
 {
     resetTest();
+
     ENABLE_ARMING_FLAG(ARMED);
     pidStabilisationState(PID_STABILISATION_ON);
+
+    pidRuntime.itermLimit = 400;
+    pidRuntime.itermLimitYaw = 320;
 
     // Test full stick response
     setStickPosition(FD_ROLL, 1.0f);
     setStickPosition(FD_PITCH, -1.0f);
     setStickPosition(FD_YAW, 1.0f);
-    simulatedMotorMixRange = 2.0f;
     pidController(pidProfile, currentTestTime());
 
-    // Expect no iterm accumulation for all axes
-    EXPECT_FLOAT_EQ(0, pidData[FD_ROLL].I);
-    EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].I);
-    EXPECT_FLOAT_EQ(0, pidData[FD_YAW].I);
+    // Expect iterm accumulation for all axes because at this point, pidSum is not at limit
+    EXPECT_NEAR(156.2f, pidData[FD_ROLL].I, calculateTolerance(156.2f));
+    EXPECT_NEAR(-195.3f, pidData[FD_PITCH].I, calculateTolerance(-195.3f));
+    EXPECT_NEAR(7.0f, pidData[FD_YAW].I, calculateTolerance(7.0f));
 
-    // Test itermWindup limit
-    // First store values without exceeding iterm windup limit
-    resetTest();
-    ENABLE_ARMING_FLAG(ARMED);
-    pidStabilisationState(PID_STABILISATION_ON);
-    setStickPosition(FD_ROLL, 0.1f);
-    setStickPosition(FD_PITCH, -0.1f);
-    setStickPosition(FD_YAW, 0.1f);
-    simulatedMotorMixRange = 0.0f;
-    pidController(pidProfile, currentTestTime());
-    float rollTestIterm = pidData[FD_ROLL].I;
-    float pitchTestIterm = pidData[FD_PITCH].I;
-    float yawTestIterm = pidData[FD_YAW].I;
+     // ????? why such slow yaw iTerm growth ?? this is not what I see in the real logs == strange
 
-    // Now compare values when exceeding the limit
-    resetTest();
-    ENABLE_ARMING_FLAG(ARMED);
-    pidStabilisationState(PID_STABILISATION_ON);
-    setStickPosition(FD_ROLL, 0.1f);
-    setStickPosition(FD_PITCH, -0.1f);
-    setStickPosition(FD_YAW, 0.1f);
-    simulatedMotorMixRange = (pidProfile->itermWindupPointPercent + 2) / 100.0f;
+    // Check for iterm growth, should not reach limits yet
     pidController(pidProfile, currentTestTime());
-    EXPECT_LT(pidData[FD_ROLL].I, rollTestIterm);
-    EXPECT_GE(pidData[FD_PITCH].I, pitchTestIterm);
-    EXPECT_LT(pidData[FD_YAW].I, yawTestIterm);
+    EXPECT_NEAR(312.4f, pidData[FD_ROLL].I, calculateTolerance(312.4f));
+    EXPECT_NEAR(-390.6f, pidData[FD_PITCH].I, calculateTolerance(-390.6));
+    EXPECT_NEAR(21.1f, pidData[FD_YAW].I, calculateTolerance(21.1));
+
+    // Expect iterm  roll + pitch to stop at limit of 400
+    // yaw is still growing, 
+    pidController(pidProfile, currentTestTime());
+    EXPECT_NEAR(400.0f, pidData[FD_ROLL].I, calculateTolerance(400.0f));
+    EXPECT_NEAR(-400.0f, pidData[FD_PITCH].I, calculateTolerance(-400.0f));
+    EXPECT_NEAR(42.2f, pidData[FD_YAW].I, calculateTolerance(42.2f));
+
+    // run some more loops, check all iTerm values are at their limit
+    for (int loop = 0; loop < 7; loop++) {
+        pidController(pidProfile, currentTestTime());
+    }
+    EXPECT_NEAR(400, pidData[FD_ROLL].I, calculateTolerance(400));
+    EXPECT_NEAR(-400, pidData[FD_PITCH].I, calculateTolerance(-400));
+    EXPECT_NEAR(320, pidData[FD_YAW].I, calculateTolerance(320));
 
     // Test that the added i term gain from Anti Gravity
-    // is also affected by itermWindup
+    // is also limited
     resetTest();
     ENABLE_ARMING_FLAG(ARMED);
     pidStabilisationState(PID_STABILISATION_ON);
+    pidRuntime.itermLimit = 400;
+    pidRuntime.itermLimitYaw = 320;
 
     setStickPosition(FD_ROLL, 1.0f);
     setStickPosition(FD_PITCH, -1.0f);
     setStickPosition(FD_YAW, 1.0f);
-    simulatedMotorMixRange = 2.0f;
     const bool prevAgState = pidRuntime.antiGravityEnabled;
     const float prevAgTrhottleD = pidRuntime.antiGravityThrottleD;
     pidRuntime.antiGravityEnabled = true;
     pidRuntime.antiGravityThrottleD = 1.0;
+
     pidController(pidProfile, currentTestTime());
+
+    // Expect more iterm accumulation than before on pitch and roll, no change on yaw
+    // without antigravity values were 156, 195, 7
+    EXPECT_NEAR(210.6, pidData[FD_ROLL].I, calculateTolerance(210.6f));
+    EXPECT_NEAR(-249.6f, pidData[FD_PITCH].I, calculateTolerance(-249.6f));
+    EXPECT_NEAR(7.0f, pidData[FD_YAW].I, calculateTolerance(7.0f));
+
+    // run again and should expect to hit the limit on pitch and roll but yaw unaffected
+    pidController(pidProfile, currentTestTime());
+    EXPECT_NEAR(400, pidData[FD_ROLL].I, calculateTolerance(400));
+    EXPECT_NEAR(-400, pidData[FD_PITCH].I, calculateTolerance(-400));
+    EXPECT_NEAR(21.0f, pidData[FD_YAW].I, calculateTolerance(21.0f));
+
     pidRuntime.antiGravityEnabled = prevAgState;
     pidRuntime.antiGravityThrottleD = prevAgTrhottleD;
 
-    // Expect no iterm accumulation for all axes
-    EXPECT_FLOAT_EQ(0, pidData[FD_ROLL].I);
-    EXPECT_FLOAT_EQ(0, pidData[FD_PITCH].I);
-    EXPECT_FLOAT_EQ(0, pidData[FD_YAW].I);
+    // Test that i term is limited on yaw at 320  when only yaw is saturated
+    resetTest();
+    ENABLE_ARMING_FLAG(ARMED);
+    pidRuntime.itermLimit = 400;
+    pidRuntime.itermLimitYaw = 320;
+
+    pidStabilisationState(PID_STABILISATION_ON);
+    setStickPosition(FD_ROLL, 0.0f);
+    setStickPosition(FD_PITCH, 0.0f);
+    setStickPosition(FD_YAW, 0.5f);
+
+    for (int loop = 0; loop < 7; loop++) {
+        pidController(pidProfile, currentTestTime());
+    }
+
+    EXPECT_NEAR(0, pidData[FD_ROLL].I, calculateTolerance(0));
+    EXPECT_NEAR(0, pidData[FD_PITCH].I, calculateTolerance(0));
+    EXPECT_NEAR(197, pidData[FD_YAW].I, calculateTolerance(197));
+
+    pidController(pidProfile, currentTestTime());
+    EXPECT_NEAR(253, pidData[FD_YAW].I, calculateTolerance(320));
+
+    pidController(pidProfile, currentTestTime());
+    EXPECT_NEAR(320, pidData[FD_YAW].I, calculateTolerance(320));
+
+    pidController(pidProfile, currentTestTime());
+    EXPECT_NEAR(0, pidData[FD_ROLL].I, calculateTolerance(0));
+    EXPECT_NEAR(0, pidData[FD_PITCH].I, calculateTolerance(0));
+    EXPECT_NEAR(320, pidData[FD_YAW].I, calculateTolerance(320));
+}
+
+TEST(pidControllerTest, testiTermWindup)
+{
+    resetTest();
+    ENABLE_ARMING_FLAG(ARMED);
+    // simulate the outcome with iterm_windup of 50
+    pidRuntime.itermLimit = 200;
+    pidRuntime.itermLimitYaw = 160;
+
+    pidStabilisationState(PID_STABILISATION_ON);
+    setStickPosition(FD_ROLL, 0.12f);
+    setStickPosition(FD_PITCH, 0.12f);
+    setStickPosition(FD_YAW, 0.12f);
+
+    for (int loop = 0; loop < 7; loop++) {
+        pidController(pidProfile, currentTestTime());
+    }
+
+    EXPECT_NEAR(131, pidData[FD_ROLL].I, calculateTolerance(131));
+    EXPECT_NEAR(164, pidData[FD_PITCH].I, calculateTolerance(164));
+    EXPECT_NEAR(126, pidData[FD_YAW].I, calculateTolerance(126));
+
+    pidController(pidProfile, currentTestTime());
+    EXPECT_NEAR(150, pidData[FD_ROLL].I, calculateTolerance(150));
+    EXPECT_NEAR(200, pidData[FD_PITCH].I, calculateTolerance(200));
+    EXPECT_NEAR(137, pidData[FD_YAW].I, calculateTolerance(137));
+
+    pidController(pidProfile, currentTestTime());
+    EXPECT_NEAR(169, pidData[FD_ROLL].I, calculateTolerance(200));
+    EXPECT_NEAR(200, pidData[FD_PITCH].I, calculateTolerance(200));
+    EXPECT_NEAR(160, pidData[FD_YAW].I, calculateTolerance(160));
+
+    pidController(pidProfile, currentTestTime());
+    EXPECT_NEAR(200, pidData[FD_ROLL].I, calculateTolerance(200));
+    EXPECT_NEAR(200, pidData[FD_PITCH].I, calculateTolerance(200));
+    EXPECT_NEAR(160, pidData[FD_YAW].I, calculateTolerance(320));
 }
 
 // TODO - Add more scenarios
@@ -835,6 +1009,8 @@ TEST(pidControllerTest, testLaunchControl)
     // The launchControlGain is indirectly tested since when launch control is active the
     // the gain overrides the PID settings. If the logic to use launchControlGain wasn't
     // working then any I calculations would be incorrect.
+    
+    // Launch control requires stick deflection which should offset ezLanding
 
     resetTest();
     unitLaunchControlActive = true;

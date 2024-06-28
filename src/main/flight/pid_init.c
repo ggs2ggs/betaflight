@@ -304,11 +304,6 @@ void pidInitConfig(const pidProfile_t *pidProfile)
 
     pidRuntime.maxVelocity[FD_ROLL] = pidRuntime.maxVelocity[FD_PITCH] = pidProfile->rateAccelLimit * 100 * pidRuntime.dT;
     pidRuntime.maxVelocity[FD_YAW] = pidProfile->yawRateAccelLimit * 100 * pidRuntime.dT;
-    pidRuntime.itermWindupPointInv = 1.0f;
-    if (pidProfile->itermWindupPointPercent < 100) {
-        const float itermWindupPoint = pidProfile->itermWindupPointPercent / 100.0f;
-        pidRuntime.itermWindupPointInv = 1.0f / (1.0f - itermWindupPoint);
-    }
     pidRuntime.antiGravityGain = pidProfile->anti_gravity_gain;
     pidRuntime.crashTimeLimitUs = pidProfile->crash_time * 1000;
     pidRuntime.crashTimeDelayUs = pidProfile->crash_delay * 1000;
@@ -318,7 +313,12 @@ void pidInitConfig(const pidProfile_t *pidProfile)
     pidRuntime.crashDtermThreshold = pidProfile->crash_dthreshold;
     pidRuntime.crashSetpointThreshold = pidProfile->crash_setpoint_threshold;
     pidRuntime.crashLimitYaw = pidProfile->crash_limit_yaw;
-    pidRuntime.itermLimit = pidProfile->itermLimit;
+
+    pidRuntime.itermLeakRateYaw = pidRuntime.dT * pidProfile->itermLeak / 10.0f;
+    pidRuntime.itermLimit = 0.01f * pidProfile->itermWindup * pidProfile->pidSumLimit;
+    pidRuntime.itermLimitYaw = 0.01f * pidProfile->itermWindup * pidProfile->pidSumLimitYaw;
+
+
 #if defined(USE_THROTTLE_BOOST)
     throttleBoost = pidProfile->throttle_boost * 0.1f;
 #endif
@@ -439,6 +439,13 @@ void pidInitConfig(const pidProfile_t *pidProfile)
     pidRuntime.tpaLowBreakpoint = MIN(pidRuntime.tpaLowBreakpoint, pidRuntime.tpaBreakpoint);
     pidRuntime.tpaLowMultiplier = pidProfile->tpa_low_rate / (100.0f * pidRuntime.tpaLowBreakpoint);
     pidRuntime.tpaLowAlways = pidProfile->tpa_low_always;
+
+    pidRuntime.useEzLanding = pidProfile->ez_landing_threshold && pidProfile->ez_landing_limit;
+    pidRuntime.useEzDisarm = pidRuntime.useEzLanding && pidProfile->ez_landing_disarm_threshold > 0;
+    pidRuntime.ezLandingThreshold = pidProfile->ez_landing_threshold / 100.0f;
+    pidRuntime.ezLandingLimit = pidProfile->ez_landing_limit;
+    pidRuntime.ezLandingDisarmThreshold = pidProfile->ez_landing_disarm_threshold / 10.0f;
+
 }
 
 void pidCopyProfile(uint8_t dstPidProfileIndex, uint8_t srcPidProfileIndex)

@@ -157,9 +157,9 @@ typedef struct pidProfile_s {
     pidf_t  pid[PID_ITEM_COUNT];
 
     uint8_t dterm_lpf1_type;                // Filter type for dterm lowpass 1
-    uint8_t itermWindupPointPercent;        // iterm windup threshold, percent motor saturation
-    uint16_t pidSumLimit;
-    uint16_t pidSumLimitYaw;
+    uint8_t itermWindup;                    // iterm windup threshold, percentage of pidSumLimit within which to limit iTerm
+    uint16_t pidSumLimit;                   // pidSum limit value for yaw
+    uint16_t pidSumLimitYaw;                // pidSum limit value for yaw
     uint8_t pidAtMinThrottle;               // Disable/Enable pids on zero throttle. Normally even without airmode P and D would be active.
     uint8_t angle_limit;                    // Max angle in degrees in Angle mode
 
@@ -259,11 +259,12 @@ typedef struct pidProfile_s {
 
     uint8_t ez_landing_threshold;           // Threshold stick position below which motor output is limited
     uint8_t ez_landing_limit;               // Maximum motor output when all sticks centred and throttle zero
-    uint8_t ez_landing_speed;               // Speed below which motor output is limited
+    uint8_t ez_landing_disarm_threshold;    // Accelerometer vector threshold which disarms if exceeded
     uint16_t tpa_delay_ms;                  // TPA delay for fixed wings using pt2 filter (time constant)
     uint16_t spa_center[XYZ_AXIS_COUNT];    // RPY setpoint at which PIDs are reduced to 50% (setpoint PID attenuation)
     uint16_t spa_width[XYZ_AXIS_COUNT];     // Width of smooth transition around spa_center
     uint8_t spa_mode[XYZ_AXIS_COUNT];       // SPA mode for each axis
+    uint8_t itermLeak;                      // Fractional rate at which iTerm on yaw leaks towards zero, arbitrary units
 } pidProfile_t;
 
 PG_DECLARE_ARRAY(pidProfile_t, PID_PROFILE_COUNT, pidProfiles);
@@ -334,7 +335,6 @@ typedef struct pidRuntime_s {
     float horizonLimitDegreesInv;
     float horizonIgnoreSticks;
     float maxVelocity[XYZ_AXIS_COUNT];
-    float itermWindupPointInv;
     bool inCrashRecoveryMode;
     timeUs_t crashDetectedAtUs;
     timeDelta_t crashTimeLimitUs;
@@ -345,7 +345,9 @@ typedef struct pidRuntime_s {
     float crashDtermThreshold;
     float crashSetpointThreshold;
     float crashLimitYaw;
+    float itermLeakRateYaw;
     float itermLimit;
+    float itermLimitYaw;
     bool itermRotation;
     bool zeroThrottleItermReset;
     bool levelRaceMode;
@@ -355,6 +357,11 @@ typedef struct pidRuntime_s {
     float tpaLowBreakpoint;
     float tpaLowMultiplier;
     bool tpaLowAlways;
+    bool useEzLanding;
+    float ezLandingThreshold;
+    float ezLandingLimit;
+    bool useEzDisarm;
+    float ezLandingDisarmThreshold;
 
 #ifdef USE_ITERM_RELAX
     pt1Filter_t windupLpf[XYZ_AXIS_COUNT];
@@ -474,6 +481,7 @@ void pidUpdateAntiGravityThrottleFilter(float throttle);
 bool pidOsdAntiGravityActive(void);
 void pidSetAntiGravityState(bool newState);
 bool pidAntiGravityEnabled(void);
+
 
 #ifdef USE_THRUST_LINEARIZATION
 float pidApplyThrustLinearization(float motorValue);
